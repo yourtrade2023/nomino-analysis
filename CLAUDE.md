@@ -56,6 +56,36 @@ curl -sS -X POST "https://asia-northeast1-shop-management-475406.cloudfunctions.
 7. **会員データの注意**: 2026年6月頃に会員登録をLINE経由へ変更したが、LINE↔Cyberbiz会員が未紐付け。`cyberbiz_customers` は4/10時点のスナップショット。**6月以降の「新規会員減・ゲスト比率上昇」は計測の断絶であり需要減ではない**
 8. **既知のデータ不備**: 新莊店の仕入データに日付が2026-12になっているタイポあり
 
+## BigQuery側の在庫データ（inventory_T / inventory_T_shop）
+
+倉庫在庫はPostgreSQLではなく **BigQuery**（`yourtrade-prod.yourtrade_dataset`）にあります。`/api/query` はPostgreSQL専用なので、BQは以下の専用エンドポイントで確認します（**BQへの汎用SQLゲートウェイは無い**）。
+
+| テーブル | 内容 |
+|---|---|
+| `inventory_T` | **NX倉庫（WMS）の在庫マスタ**。約74万行。日次スナップショット |
+| `inventory_T_shop` | 同構造の**店舗側在庫**（約3.4万行） |
+
+共通スキーマ: `wms_import_date`(取込日=スナップショット日付), `jancode`, `new_grade`(等級 SS/S/A/B/C), `parent_sku`, `child_sku`, `picking_key_1/2`, `seller_name`(Coupang等), `item_name`, `list_price`, `box_price`, `sum_total_qty`(数量), `inventory_amount`, `order_count`, `expiry_date`(賞味期限)
+
+### 確認方法
+
+```bash
+# ① データセット内の全テーブル一覧＋スキーマ
+curl -sS "https://asia-northeast1-shop-management-475406.cloudfunctions.net/store-analysis/api/bq-explore"
+
+# ② inventory_T のスキーマ・行数・サンプル5行
+curl -sS ".../store-analysis/api/bq-explore?table=inventory_T"
+
+# ③ 賞味期限リスト（inventory_T と inventory_T_shop を統合した加工済みデータ）
+curl -sS ".../store-analysis/api/expiry-list"
+#    ブラウザ版: .../store-analysis/expiry-list
+```
+
+注意点:
+- **スナップショット型**なので、最新状態を見るには `wms_import_date` が最新日の行だけを使う（全期間を合算すると数量が何重にもなる）
+- 同一SKUでも `expiry_date`（賞味期限ロット）ごとに行が分かれる
+- 深い集計（BQ上でのGROUP BY等）が必要になったら、管理者（石川さん）に依頼して専用エンドポイントを追加してもらうこと
+
 ## 業務定数
 
 - 目標在庫日数30日 / リードタイム7日 / 販売分析窓90日 / 滞留警告60日・危険90日
