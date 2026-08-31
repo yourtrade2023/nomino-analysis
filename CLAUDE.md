@@ -50,7 +50,7 @@ curl -sS -X POST "https://asia-northeast1-shop-management-475406.cloudfunctions.
 1. **有効注文のフィルタ**: 必ず `WHERE order_status NOT IN ('cancelled','refunded') AND total_price > 0`
 2. **GMV定義**: `SUM(sale_price * quantity)`（値引前）。実現売上は注文単位値引（total_optional/shop/coupon_discount）を控除
 3. **vendor名寄せ**: `vendor` がNULL/空欄は **COSTCO扱い**。表記揺れあり（YOUCT%/YOUTW% で始まるSKUもCostco系）
-4. **みなし原価**（cost_price<=0 の行に適用）: 委託8社（富士器業・IRIS OHYAMA・盈鑽國際・眾志成・AIRMATE・OZAX・瑪莎利亞・Richell）=売価の58% / COSTCO=40% / Coupang=20%。Costcoの登録原価は「コストコ店頭価格×30%」の計算値
+4. **みなし原価**（cost_price<=0 の行に適用、2026-08-31実測較正）: 委託8社（富士器業・IRIS OHYAMA・盈鑽國際・眾志成・AIRMATE・OZAX・瑪莎利亞・Richell）=売価の70% / COSTCO=51% / Coupang=42% / 亞捷・COSTCO JAPAN・YOUTW・巨吉=40% / その他未登録=65%。Costcoの登録原価は「コストコ店頭価格×30%」の計算値
 5. **ゲスト客**: `customer_id = 33184025` はPOSの訪客（非会員一括ID）。客数分析では除外か別枠に
 6. **スタッフ・元スタッフ除外**（顧客分析時）: customer_id IN (36129233, 37557893, 36557430, 39689659, 36092685)
 7. **会員データの注意**: 2026年6月頃に会員登録をLINE経由へ変更したが、LINE↔Cyberbiz会員が未紐付け。`cyberbiz_customers` は4/10時点のスナップショット。**6月以降の「新規会員減・ゲスト比率上昇」は計測の断絶であり需要減ではない**
@@ -58,7 +58,13 @@ curl -sS -X POST "https://asia-northeast1-shop-management-475406.cloudfunctions.
 
 ## BigQuery側の在庫データ（inventory_T / inventory_T_shop）
 
-倉庫在庫はPostgreSQLではなく **BigQuery**（`yourtrade-prod.yourtrade_dataset`）にあります。`/api/query` はPostgreSQL専用なので、BQは以下の専用エンドポイントで確認します（**BQへの汎用SQLゲートウェイは無い**）。
+倉庫在庫はPostgreSQLではなく **BigQuery**（`yourtrade-prod.yourtrade_dataset`）にあります。`/api/query` はPostgreSQL専用。BQには専用の読み取りゲートウェイ **`/api/bq-query`** を使います（同一ポリシー: SELECT/WITH限定・1000行上限・スキャン上限1GB。テーブル名は `inventory_T` のように非修飾でOK）。
+
+```bash
+curl -sS -X POST ".../store-analysis/api/bq-query" \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT parent_sku, item_name, SUM(sum_total_qty) AS qty FROM inventory_T WHERE wms_import_date = (SELECT MAX(wms_import_date) FROM inventory_T) GROUP BY 1,2 ORDER BY qty DESC LIMIT 20"}'
+```
 
 | テーブル | 内容 |
 |---|---|
@@ -84,7 +90,7 @@ curl -sS ".../store-analysis/api/expiry-list"
 注意点:
 - **スナップショット型**なので、最新状態を見るには `wms_import_date` が最新日の行だけを使う（全期間を合算すると数量が何重にもなる）
 - 同一SKUでも `expiry_date`（賞味期限ロット）ごとに行が分かれる
-- 深い集計（BQ上でのGROUP BY等）が必要になったら、管理者（石川さん）に依頼して専用エンドポイントを追加してもらうこと
+- POS側SKUとの突合キーは `jancode`（バーコード）または `parent_sku`/`child_sku`
 
 ## 業務定数
 

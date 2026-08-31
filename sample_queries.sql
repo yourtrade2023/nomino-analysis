@@ -66,21 +66,23 @@ WHERE COALESCE(st.inventory_quantity,0) < s.daily_qty * 7
 ORDER BY days_left NULLS FIRST LIMIT 50;
 
 -- 【6】粗利率（みなし原価適用・月次）
---   委託8社=58% / COSTCO(空欄含む)=40% / Coupang=20% を cost_price<=0 の行に適用
+--   委託8社=70% / COSTCO(空欄含む)=51% / Coupang=42% / 亞捷・COSTCO JAPAN・YOUTW・巨吉=40% / その他=65%（2026-08-31実測較正）
 SELECT to_char(date_trunc('month', order_at), 'YYYY-MM') AS month,
        ROUND(SUM(sale_price*quantity)) AS gmv,
        ROUND(SUM((sale_price - CASE
          WHEN cost_price > 0 THEN cost_price
-         WHEN vendor IN ('富士器業','IRIS OHYAMA','盈鑽國際','眾志成','AIRMATE','OZAX','瑪莎利亞','Richell') THEN sale_price*0.58
-         WHEN COALESCE(vendor,'') IN ('COSTCO','') THEN sale_price*0.40
-         WHEN vendor ILIKE '%coupang%' THEN sale_price*0.20
-         ELSE 0 END) * quantity)) AS gross_profit,
+         WHEN vendor IN ('富士器業','IRIS OHYAMA','盈鑽國際','眾志成','AIRMATE','OZAX','瑪莎利亞','Richell') THEN sale_price*0.70
+         WHEN COALESCE(vendor,'') IN ('COSTCO','') THEN sale_price*0.51
+         WHEN vendor ILIKE '%coupang%' THEN sale_price*0.42
+         WHEN vendor IN ('亞捷','COSTCO JAPAN','YOUTW','巨吉') THEN sale_price*0.40
+         ELSE sale_price*0.65 END) * quantity)) AS gross_profit,
        ROUND(100.0 * SUM((sale_price - CASE
          WHEN cost_price > 0 THEN cost_price
-         WHEN vendor IN ('富士器業','IRIS OHYAMA','盈鑽國際','眾志成','AIRMATE','OZAX','瑪莎利亞','Richell') THEN sale_price*0.58
-         WHEN COALESCE(vendor,'') IN ('COSTCO','') THEN sale_price*0.40
-         WHEN vendor ILIKE '%coupang%' THEN sale_price*0.20
-         ELSE 0 END) * quantity) / NULLIF(SUM(sale_price*quantity),0), 1) AS margin_pct
+         WHEN vendor IN ('富士器業','IRIS OHYAMA','盈鑽國際','眾志成','AIRMATE','OZAX','瑪莎利亞','Richell') THEN sale_price*0.70
+         WHEN COALESCE(vendor,'') IN ('COSTCO','') THEN sale_price*0.51
+         WHEN vendor ILIKE '%coupang%' THEN sale_price*0.42
+         WHEN vendor IN ('亞捷','COSTCO JAPAN','YOUTW','巨吉') THEN sale_price*0.40
+         ELSE sale_price*0.65 END) * quantity) / NULLIF(SUM(sale_price*quantity),0), 1) AS margin_pct
 FROM pos_orders
 WHERE order_status NOT IN ('cancelled','refunded') AND total_price > 0
 GROUP BY 1 ORDER BY 1;
