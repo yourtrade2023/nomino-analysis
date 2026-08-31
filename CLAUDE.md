@@ -58,7 +58,7 @@ curl -sS -X POST "https://asia-northeast1-shop-management-475406.cloudfunctions.
 
 ## BigQuery側の在庫データ（inventory_T / inventory_T_shop）
 
-倉庫在庫はPostgreSQLではなく **BigQuery**（`yourtrade-prod.yourtrade_dataset`）にあります。`/api/query` はPostgreSQL専用なので、BQは以下の専用エンドポイントで確認します（**BQへの汎用SQLゲートウェイは無い**）。
+倉庫在庫はPostgreSQLではなく **BigQuery**（`yourtrade-prod.yourtrade_dataset`）にあります。`/api/query` はPostgreSQL専用ですが、**BQ用の汎用SQLゲートウェイ `/api/bq-query` が使えます**（エンドポイント一覧には未掲載）。
 
 | テーブル | 内容 |
 |---|---|
@@ -70,21 +70,31 @@ curl -sS -X POST "https://asia-northeast1-shop-management-475406.cloudfunctions.
 ### 確認方法
 
 ```bash
-# ① データセット内の全テーブル一覧＋スキーマ
+# ① BQへSQLを投げる（GROUP BY等の集計もできる。テーブル名はバッククォートで完全修飾）
+curl -sS -X POST ".../store-analysis/api/bq-query" \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT jancode, SUM(sum_total_qty) qty FROM `yourtrade-prod.yourtrade_dataset.inventory_T` WHERE wms_import_date = (SELECT MAX(wms_import_date) FROM `yourtrade-prod.yourtrade_dataset.inventory_T`) GROUP BY 1"}'
+#    ヘルパー: bq_query.sh "SELECT ..."
+
+# ② データセット内の全テーブル一覧＋スキーマ
 curl -sS "https://asia-northeast1-shop-management-475406.cloudfunctions.net/store-analysis/api/bq-explore"
 
-# ② inventory_T のスキーマ・行数・サンプル5行
+# ③ inventory_T のスキーマ・行数・サンプル5行（絞り込み不可。SKU指定は①を使う）
 curl -sS ".../store-analysis/api/bq-explore?table=inventory_T"
 
-# ③ 賞味期限リスト（inventory_T と inventory_T_shop を統合した加工済みデータ）
+# ④ 賞味期限リスト（BQの expiry_date に POS の在庫数・原価を結合した加工済みデータ）
 curl -sS ".../store-analysis/api/expiry-list"
 #    ブラウザ版: .../store-analysis/expiry-list
 ```
 
 注意点:
 - **スナップショット型**なので、最新状態を見るには `wms_import_date` が最新日の行だけを使う（全期間を合算すると数量が何重にもなる）
+- **`wms_import_date` の最新は 2026-07-24 で止まっている**（2026-08-31時点。日次のはずが約5週間更新なし）。NX在庫を語るときは必ず最新日を確認し、鮮度を明記すること
+- 最新スナップショットの規模: `inventory_T` = 1,540行/1,459SKU/11,651個/在庫金額 約492万元、`inventory_T_shop` = 290行/219SKU/1,361個/約28万元
 - 同一SKUでも `expiry_date`（賞味期限ロット）ごとに行が分かれる
-- 深い集計（BQ上でのGROUP BY等）が必要になったら、管理者（石川さん）に依頼して専用エンドポイントを追加してもらうこと
+- POS側との突合キーは **`jancode`**（POSの数字始まりSKU＝JANと一致）または `child_sku`（`IRSTW_1510SS` など委託系SKUと一致）
+- `/api/expiry-list` の `stock` は**POS在庫をロット行に複製したもの**でBQのロット別数量ではない。ロット別数量が要るときは①で `sum_total_qty` を直接取る
+- NX倉庫にあるのはIRIS・COSTCO・Coupang系が中心。店舗が台湾の食品卸から直接仕入れた商品（Cocacola・巨吉・信德など）はNXを通らないため在庫ゼロが正常
 
 ## 業務定数
 
